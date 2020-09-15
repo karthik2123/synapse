@@ -21,8 +21,9 @@ from collections import namedtuple
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Tuple, Type, TypeVar
 
 import attr
+import cbor2
 from signedjson.key import decode_verify_key_bytes
-from unpaddedbase64 import decode_base64
+from unpaddedbase64 import decode_base64, encode_base64
 
 from synapse.api.errors import Codes, SynapseError
 
@@ -362,7 +363,7 @@ def map_username_to_mxid_localpart(username, case_sensitive=False):
     return username.decode("ascii")
 
 
-@attr.s(frozen=True, slots=True)
+@attr.s(frozen=True, slots=True, cmp=False)
 class RoomStreamToken:
     """Tokens are positions between events. The token "s1" comes after event 1.
 
@@ -392,6 +393,8 @@ class RoomStreamToken:
     )
     stream = attr.ib(type=int, validator=attr.validators.instance_of(int))
 
+    instance_map = attr.ib(type=Dict[str, int], factory=dict)
+
     @classmethod
     async def parse(cls, store, string: str) -> "RoomStreamToken":
         try:
@@ -400,6 +403,11 @@ class RoomStreamToken:
             if string[0] == "t":
                 parts = string[1:].split("-", 1)
                 return cls(topological=int(parts[0]), stream=int(parts[1]))
+            if string[0] == "m":
+                payload = cbor2.loads(decode_base64(string[1:]))
+                return cls(
+                    topological=None, stream=payload["s"], instance_map=payload["p"],
+                )
         except Exception:
             pass
         raise SynapseError(400, "Invalid token %r" % (string,))
@@ -419,7 +427,15 @@ class RoomStreamToken:
 
         max_stream = max(self.stream, other.stream)
 
-        return RoomStreamToken(None, max_stream)
+        instance_map = {
+            instance: max(
+                self.instance_map.get(instance, self.stream),
+                other.instance_map.get(instance, other.stream),
+            )
+            for instance in set(self.instance_map).union(other.instance_map)
+        }
+
+        return RoomStreamToken(None, max_stream, instance_map)
 
     def as_tuple(self) -> Tuple[Optional[int], int]:
         return (self.topological, self.stream)
@@ -427,6 +443,10 @@ class RoomStreamToken:
     def __str__(self) -> str:
         if self.topological is not None:
             return "t%d-%d" % (self.topological, self.stream)
+        elif self.instance_map:
+            return "m" + encode_base64(
+                cbor2.dumps({"s": self.stream, "p": self.instance_map}),
+            )
         else:
             return "s%d" % (self.stream,)
 
@@ -506,7 +526,7 @@ class PersistedEventPosition:
     stream = attr.ib(type=int)
 
     def persisted_after(self, token: RoomStreamToken) -> bool:
-        return token.stream < self.stream
+        return token.instance_map.get(self.instance_name, token.stream) < self.stream
 
     def to_room_stream_token(self) -> RoomStreamToken:
         """Converts the position to a room stream token such that events
