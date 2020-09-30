@@ -26,6 +26,7 @@ import math
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
+from typing import Dict, List
 from urllib.parse import parse_qs, urlparse
 
 from prometheus_client import REGISTRY
@@ -125,7 +126,7 @@ def generate_latest(registry, emit_help=False):
             )
         output.append("# TYPE {0} {1}\n".format(mname, mtype))
 
-        om_samples = {}
+        om_samples = {}  # type: Dict[str, List[str]]
         for s in metric.samples:
             for suffix in ["_created", "_gsum", "_gcount"]:
                 if s.name == metric.name + suffix:
