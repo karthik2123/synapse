@@ -258,7 +258,7 @@ class GaugeBucketCollector:
         self._metric = self._values_to_metric(values)
 
     def _values_to_metric(self, values: Iterable[float]) -> GaugeHistogramMetricFamily:
-        total = 0
+        total = 0.0
         bucket_values = [0 for _ in self._bucket_bounds]
 
         for v in values:
@@ -273,12 +273,14 @@ class GaugeBucketCollector:
 
         # now, aggregate the bucket values so that they count the number of entries in
         # that bucket or below.
-        bucket_values = itertools.accumulate(bucket_values)
+        accumulated_values = itertools.accumulate(bucket_values)
 
         return GaugeHistogramMetricFamily(
             self._name,
             self._documentation,
-            buckets=list(zip((str(b) for b in self._bucket_bounds), bucket_values)),
+            buckets=list(
+                zip((str(b) for b in self._bucket_bounds), accumulated_values)
+            ),
             gsum_value=total,
         )
 
